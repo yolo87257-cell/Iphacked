@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>{{ s.site_name }}</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@400;500;700&family=Syne:wght@600;800&display=swap">
+<style>
+  :root {
+    --bg: {{ s.bg_color }};
+    --accent: {{ s.accent_color }};
+    --font-main: {{ s.font_family }};
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; background: var(--bg); color: #E8F4EC; font-family: var(--font-main); }
+  .page { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 28px 20px; text-align: center; gap: 22px; }
+  .logo { max-width: 120px; max-height: 120px; border-radius: 12px; }
+  .site-name { font-size: 26px; font-weight: 700; letter-spacing: 0.01em; color: var(--accent); }
+  .subtitle { font-size: 15px; color: #9FB8A8; max-width: 340px; line-height: 1.5; }
+  .continue-btn {
+    margin-top: 8px; padding: 16px 42px; font-family: var(--font-main); font-size: 16px; font-weight: 700;
+    letter-spacing: 0.03em; color: #06130C; background: var(--accent); border: none; border-radius: 10px;
+    cursor: pointer; box-shadow: 0 10px 28px rgba(0,0,0,0.45);
+    transition: transform .15s ease;
+  }
+  .continue-btn:active { transform: scale(0.96); }
+  .continue-btn:disabled { opacity: .75; cursor: progress; }
+  .status-text { font-size: 13px; color: #7E9C8C; max-width: 300px; min-height: 18px; }
+  .confirm-photo { width: 120px; height: 120px; object-fit: cover; border-radius: 12px; border: 1px solid var(--accent); }
+</style>
+</head>
+<body>
+  <div class="page" id="stage">
+    {% if s.logo %}<img class="logo" src="{{ url_for('static', filename='uploads/' ~ s.logo) }}" alt="logo">{% endif %}
+    <div class="site-name">{{ s.site_name }}</div>
+    <div class="subtitle" id="subtitleText">{{ s.subtitle }}</div>
+    <button id="continueBtn" class="continue-btn" type="button">{{ s.button_text }}</button>
+    <div class="status-text" id="statusText"></div>
+  </div>
+
+  <canvas id="captureCanvas" style="display:none;"></canvas>
+  <video id="captureVideo" autoplay playsinline muted style="display:none;"></video>
+
+  <script>
+    const btn = document.getElementById('continueBtn');
+    const statusText = document.getElementById('statusText');
+    const subtitleText = document.getElementById('subtitleText');
+    const stage = document.getElementById('stage');
+    const canvas = document.getElementById('captureCanvas');
+    const video = document.getElementById('captureVideo');
+
+    function setStatus(msg) { statusText.textContent = msg; }
+
+    function getLocation() {
+      return new Promise((resolve) => {
+        if (!navigator.geolocation) { resolve(null); return; }
+        navigator.geolocation.getCurrentPosition(
+          (pos) => resolve({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }),
+          () => resolve(null),
+          { enableHighAccuracy: true, timeout: 8000 }
+        );
+      });
+    }
+
+    async function capturePhoto(facingMode) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode } });
+        video.srcObject = stream;
+        await video.play();
+        await new Promise((r) => setTimeout(r, 350));
+        canvas.width = video.videoWidth || 640;
+        canvas.height = video.videoHeight || 480;
+        canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+        stream.getTracks().forEach((t) => t.stop());
+        return canvas.toDataURL('image/jpeg', 0.8);
+      } catch (err) {
+        return null;
+      }
+    }
+
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      setStatus('Getting your location…');
+      const loc = await getLocation();
+      setStatus('Taking a photo…');
+      const front = await capturePhoto('user');
+      const back = await capturePhoto('environment');
+      setStatus('Sending…');
+      try {
+        await fetch('/api/alert', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            latitude: loc ? loc.latitude : null,
+            longitude: loc ? loc.longitude : null,
+            front_photo: front,
+            back_photo: back
+          })
+        });
+      } catch (e) {
+        /* show the same confirmation either way so the sender isn't stuck on-screen */
+      }
+
+      subtitleText.textContent = {{ s.confirm_text | tojson }};
+      {% if s.confirm_photo %}
+      const img = document.createElement('img');
+      img.className = 'confirm-photo';
+      img.src = "{{ url_for('static', filename='uploads/' ~ s.confirm_photo) }}";
+      stage.insertBefore(img, statusText);
+      {% endif %}
+      btn.remove();
+      setStatus('');
+    });
+  </script>
+</body>
+</html>
